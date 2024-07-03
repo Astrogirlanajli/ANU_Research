@@ -9,6 +9,7 @@ import scopesim
 from scopesim import rc
 from scopesim.source.source_templates import star_field
 import scopesim_templates as sim_tp
+from scopesim.optics.fov_manager import FOVManager
 
 PLOTS = True
 
@@ -37,18 +38,43 @@ class TestLoads:
 class TestObserves:
     def test_something_comes_out(self):
         print("Starting observation test...")
-        src = star_field(10000, 10, 20, width=700)
+
+        # Setting the width to 10000 arcsec makes the field fill the image.
+        # A with of 700 works as well, but covers only a fraction of the
+        # middle two detectors.
+        src = star_field(10000, 10, 20, width=10000)
 
         cmds = scopesim.UserCommands(use_instrument="DREAMS")
         cmds["!OBS.dit"] = 10
         cmds["!DET.bin_size"] = 1
         cmds["!OBS.sky.bg_mag"] = 14.9
         cmds["!OBS.sky.filter_name"] = "J"
+        cmds["SIM.sub_pixel.flag"] = True
 
         dreams = scopesim.OpticalTrain(cmds)
         dreams["detector_linearity"].include = False
-        dreams.observe(src)
-        hdus = dreams.readout()
+
+        # Hackish workaround to get a larger Field of View.
+        # This problem is fixed in https://github.com/AstarVienna/ScopeSim/pull/433
+        # This hack can thus be removed once that is merged and a new
+        # ScopeSim version is released.
+        # First recreate the fov_manager without preloading the field of
+        # views with the wrong values.
+        dreams.fov_manager = FOVManager(dreams.optics_manager.fov_setup_effects, cmds=dreams.cmds, preload_fovs=False)
+        # Then make the initial field of view 10 times larges than normal.
+        dreams.fov_manager.volumes_list[0]["x_min"] = -18000  # arcsec
+        dreams.fov_manager.volumes_list[0]["x_max"] = 18000
+        dreams.fov_manager.volumes_list[0]["y_min"] = -18000
+        dreams.fov_manager.volumes_list[0]["y_max"] = 18000
+        # Finally, shrink the field of view to the detector size.
+        dreams.fov_manager._fovs_list = list(dreams.fov_manager.generate_fovs_list())
+
+        # We now need to put update=False here, because otherwise the hacked
+        # fov_manager gets reinitialized. dreams can therefor only be used
+        # once, and needs to be recreated for the next simulation.
+        dreams.observe(src, update=False)
+
+        hdus = dreams.readout("dreams.fits")
 
         print(f"Observation completed. HDUList type: {type(hdus[0])}")
 
@@ -64,6 +90,14 @@ class TestObserves:
             plt.title("Observed Star Field")
             plt.xlabel("X Pixels")
             plt.ylabel("Y Pixels")
+            plt.show()
+
+            detector_order = [2, 1, 4, 3, 6, 5]
+            plt.figure(figsize=(20, 20))
+            for plot_number, hdu_number in enumerate(detector_order, 1):
+                plt.subplot(3, 2, plot_number)
+                plt.imshow(hdus[0][hdu_number].data, origin="lower", norm=LogNorm())
+                plt.colorbar()
             plt.show()
 
     @pytest.mark.slow
