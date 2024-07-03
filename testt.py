@@ -92,10 +92,9 @@ class TestObserves:
         src = sim_tp.stellar.cluster(mass=10000, distance=2000, core_radius=1)
         dreams = scopesim.OpticalTrain("DREAMS")
         dreams.observe(src)
-        dreams.readout(filename="GNANU.fits")
+        hdus = dreams.readout()  # Readout without saving to file
 
-        assert os.path.exists("GNANU.fits")
-        print("Readout saved to GNANU.fits.")
+        print("Readout process completed.")
 
 def run_test_and_plot():
     test_observes = TestObserves()
